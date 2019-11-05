@@ -50,8 +50,127 @@ In simple examples, the dependency value is an instance, and the class type serv
 ### Optional dependencies
 When a component or service declares a dependency, the class constructor takes that dependency as a parameter. You can tell Angular that the dependency is optional by annotating the constructor parameter with @Optional().
 
+## Hierarchical injectors
+
+Two injector hierarchies
+There are two injector hierarchies in Angular:
+
+ - ModuleInjector hierarchy—configure a ModuleInjector in this hierarchy using an @NgModule() or @Injectable() annotation.
+ - ElementInjector hierarchy—created implicitly at each DOM element. An ElementInjector is empty by default unless you configure it in the providers property on @Directive() or @Component().
+ 
+### ModuleInjector
+The ModuleInjector can be configured in one of two ways:
+
+Using the @Injectable() providedIn property to refer to @NgModule(), or root.
+Using the @NgModule() providers array.
+ 
+#### Tree-shaking and @Injectable()
+Using the @Injectable() providedIn property is preferable to the @NgModule() providers array because with @Injectable() providedIn, optimization tools can perform tree-shaking, which removes services that your app isn't using and results in smaller bundle sizes.
+
+Tree-shaking is especially useful for a library because the application which uses the library may not have a need to inject it.
+Child ModuleInjectors are created when lazy loading other @NgModules.
+The @Injectable() decorator identifies a service class. The providedIn property configures a specific ModuleInjector, here root, which makes the service available in the root ModuleInjector.
+
+#### Platform injector
+There are two more injectors above root, an additional ModuleInjector and NullInjector().
+
+Consider how Angular bootstraps the app with the following in main.ts:
+
+  platformBrowserDynamic().bootstrapModule(AppModule).then(ref => {...})
+  
+The bootstrapModule() method creates a child injector of the platform injector which is configured by the AppModule. This is the root ModuleInjector.
+
+The platformBrowserDynamic() method creates an injector configured by a PlatformModule, which contains platform-specific dependencies. This allows multiple apps to share a platform configuration. For example, a browser has only one URL bar, no matter how many apps you have running. You can configure additional platform-specific providers at the platform level by supplying extraProviders using the platformBrowser() function.
+
+The next parent injector in the hierarchy is the NullInjector(), which is the top of the tree. If you've gone so far up the tree that you are looking for a service in the NullInjector(), you'll get an error unless you've used @Optional() because ultimately, everything ends at the NullInjector() and it returns an error or, in the case of @Optional(), null. https://angular.io/generated/images/guide/dependency-injection/injectors.svg
+
+<img src="https://angular.io/generated/images/guide/dependency-injection/injectors.svg" width="400"/>
+
+While the name root is a special alias, other ModuleInjectors don't have aliases. You have the option to create ModuleInjectors whenever a dynamically loaded component is created, such as with the Router, which will create child ModuleInjectors.
+
+All requests forward up to the root injector, whether you configured it with the bootstrapModule() method, or registered all providers with root in their own services.
+
+If you configure an app-wide provider in the @NgModule() of AppModule, it overrides one configured for root in the @Injectable() metadata. You can do this to configure a non-default provider of a service that is shared with multiple apps.
+
+### ElementInjector
+Angular creates ElementInjectors implicitly for each DOM element.
+Providing a service in the @Component() decorator using its providers or viewProviders property configures an ElementInjector.
+
+When you provide services in a component, that service is available via the ElementInjector at that component instance. It may also be visible at child component/directives based on visibility rules described in the resolution rules section. When the component instance is destroyed, so is that service instance.
+
+#### @Directive() and @Component()
+A component is a special type of directive, which means that just as @Directive() has a providers property, @Component() does too. This means that directives as well as components can configure providers, using the providers property. When you configure a provider for a component or directive using the providers property, that provider belongs to the ElementInjector of that component or directive. Components and directives on the same element share an injector.
+
+#### Resolution rules
+When resolving a token for a component/directive, Angular resolves it in two phases:
+
+ - Against the ElementInjector hierarchy (its parents)
+ - Against the ModuleInjector hierarchy (its parents)
+ 
+ When a component declares a dependency, Angular tries to satisfy that dependency with its own ElementInjector. If the component's injector lacks the provider, it passes the request up to its parent component's ElementInjector.
+
+The requests keep forwarding up until Angular finds an injector that can handle the request or runs out of ancestor ElementInjectors.
+
+If Angular doesn't find the provider in any ElementInjectors, it goes back to the element where the request originated and looks in the ModuleInjector hierarchy. If Angular still doesn't find the provider, it throws an error.
+
+If you have registered a provider for the same DI token at different levels, the first one Angular encounters is the one it uses to resolve the dependency. If, for example, a provider is registered locally in the component that needs a service, Angular doesn't look for another provider of the same service.
+
+#### Resolution modifiers
+Angular's resolution behavior can be modified with @Optional(), @Self(), @SkipSelf() and @Host(). Import each of them from @angular/core and use each in the component class constructor when you inject your service.
+
+#### Types of modifiers
+Resolution modifiers fall into three categories:
+
+ - What to do if Angular doesn't find what you're looking for, that is @Optional()
+ - Where to start looking, that is @SkipSelf()
+ - Where to stop looking, @Host() and @Self()
+
+By default, Angular always starts at the current Injector and keeps searching all the way up. Modifiers allow you to change the starting (self) or ending location.
+
+Additionally, you can combine all of the modifiers except @Host() and @Self() and of course @Skipself() and @Self().
+
+#### @Optional()
+@Optional() allows Angular to consider a service you inject to be optional. This way, if it can't be resolved at runtime, Angular simply resolves the service as null, rather than throwing an error. 
+
+#### @Self()
+Use @Self() so that Angular will only look at the ElementInjector for the current component or directive.
+
+A good use case for @Self() is to inject a service but only if it is available on the current host element. To avoid errors in this situation, combine @Self() with @Optional().
+
+#### @SkipSelf()
+@SkipSelf() is the opposite of @Self(). With @SkipSelf(), Angular starts its search for a service in the parent ElementInjector, rather than in the current one. So if the parent ElementInjector were using the value 🌿 (fern) for emoji , but you had 🍁 (maple leaf) in the component's providers array, Angular would ignore 🍁 (maple leaf) and use 🌿 (fern).
+
+#### @SkipSelf() with @Optional()
+Use @SkipSelf() with @Optional() to prevent an error if the value is null. In the following example, the Person service is injected in the constructor. @SkipSelf() tells Angular to skip the current injector and @Optional() will prevent an error should the Person service be null.
+
+  class Person {
+    constructor(@Optional() @SkipSelf() parent: Person) {}
+  }
+  
+#### @Host()
+@Host() lets you designate a component as the last stop in the injector tree when searching for providers. Even if there is a service instance further up the tree, Angular won't continue looking.
+
+  @Component({
+    selector: 'app-host',
+    templateUrl: './host.component.html',
+    styleUrls: ['./host.component.css'],
+    //  provide the service
+    providers: [{ provide: FlowerService, useValue: { emoji: '🌼' } }]
+  })
+  export class HostComponent {
+    // use @Host() in the constructor when injecting the service
+    constructor(@Host() @Optional() public flower: FlowerService) { }
+
+  }
+  
+Since HostComponent has @Host() in its constructor, no matter what the parent of HostComponent might have as a flower.emoji value, the HostComponent will use 🌼 (yellow flower).
 
 
+
+
+
+
+ ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 ## NgModules
 An NgModule is a class marked by the @NgModule decorator. @NgModule takes a metadata object that describes how to compile a component's template and how to create an injector at runtime. It identifies the module's own components, directives, and pipes, making some of them public, through the exports property, so that external components can use them. @NgModule can also add service providers to the application dependency injectors.
