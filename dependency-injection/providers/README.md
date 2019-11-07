@@ -1,3 +1,4 @@
+
 # Dependency Providers
 A dependency  [provider](https://angular.io/guide/glossary#provider)  configures an injector with a  [DI token](https://angular.io/guide/glossary#di-token), which that injector uses to provide the concrete, runtime version of a dependency value. The injector relies on the provider configuration to create instances of the dependencies that it injects into components, directives, pipes, and other services.
 
@@ -115,3 +116,131 @@ Now you can inject the configuration object into any constructor that needs it, 
     }
 
 ## Factory providers
+Sometimes you need to create a dependent value dynamically, based on information you won't have until run time. For example, you might need information that changes repeatedly in the course of the browser session. Also, your injectable service might not have independent access to the source of the information.
+In cases like this you can use a _factory provider_. Factory providers can also be useful when creating an instance of a dependency from a third-party library that wasn't designed to work with DI.
+
+> for example:
+
+    constructor(
+      private logger: Logger,
+      private isAuthorized: boolean) { }
+    
+    getHeroes() {
+      let auth = this.isAuthorized ? 'authorized ' : 'unauthorized';
+      this.logger.log(`Getting heroes for ${auth} user.`);
+      return HEROES.filter(hero => this.isAuthorized || !hero.isSecret);
+    }
+You can inject  `Logger`, but you can't inject the  `isAuthorized`  flag. Instead, you can use a factory provider to create a new logger instance for  `HeroService`.
+
+A factory provider needs a factory function.
+
+    let heroServiceFactory = (logger: Logger, userService: UserService) => {
+      return new HeroService(logger, userService.user.isAuthorized);
+    };
+
+Although `HeroService` has no access to `UserService`, the factory function does. You inject both `Logger` and `UserService` into the factory provider and let the injector pass them along to the factory function.
+
+
+    export let heroServiceProvider =
+      { provide: HeroService,
+        useFactory: heroServiceFactory,
+        deps: [Logger, UserService]
+      };
+
+-   The  `[useFactory](https://angular.io/api/core/FactorySansProvider#useFactory)`  field tells Angular that the provider is a factory function whose implementation is  `heroServiceFactory`.
+    
+-   The  `deps`  property is an array of  [provider tokens](https://angular.io/guide/dependency-injection#token). The  `Logger`  and  `UserService`  classes serve as tokens for their own class providers. The injector resolves these tokens and injects the corresponding services into the matching factory function parameters.
+
+Notice that you captured the factory provider in an exported variable, `heroServiceProvider`. This extra step makes the factory provider reusable. You can configure a provider of `HeroService` with this variable wherever you need it. In this sample, you need it only in `HeroesComponent`, where `heroServiceProvider` replaces `HeroService` in the metadata `providers` array.
+
+## Predefined tokens and multiple providers[](https://angular.io/guide/dependency-injection-providers#predefined-tokens-and-multiple-providers "Link to this heading")
+
+Angular provides a number of built-in injection-token constants that you can use to customize the behavior of various systems.
+
+For example, you can use the following built-in tokens as hooks into the framework’s bootstrapping and initialization process. A provider object can associate any of these injection tokens with one or more callback functions that take app-specific initialization actions.
+
+-   [PLATFORM_INITIALIZER](https://angular.io/api/core/PLATFORM_INITIALIZER): Callback is invoked when a platform is initialized.
+    
+-   [APP_BOOTSTRAP_LISTENER](https://angular.io/api/core/APP_BOOTSTRAP_LISTENER): Callback is invoked for each component that is bootstrapped. The handler function receives the ComponentRef instance of the bootstrapped component.
+    
+-   [APP_INITIALIZER](https://angular.io/api/core/APP_INITIALIZER): Callback is invoked before an app is initialized. All registered initializers can optionally return a Promise. All initializer functions that return Promises must be resolved before the application is bootstrapped. If one of the initializers fails to resolves, the application is not bootstrapped.
+    
+
+The provider object can have a third option,  `multi: true`, which you can use with  `[APP_INITIALIZER](https://angular.io/api/core/APP_INITIALIZER)`  to register multiple handlers for the provide event.
+
+For example, when bootstrapping an application, you can register many initializers using the same token.
+
+    export const APP_TOKENS = [
+     { provide: PLATFORM_INITIALIZER, useFactory: platformInitialized, multi: true    },
+     { provide: APP_INITIALIZER, useFactory: delayBootstrapping, multi: true },
+     { provide: APP_BOOTSTRAP_LISTENER, useFactory: appBootstrapped, multi: true },
+    ];
+Multiple providers can be associated with a single token in other areas as well. For example, you can register a custom form validator using the built-in [NG_VALIDATORS](https://angular.io/api/forms/NG_VALIDATORS) token, and provide multiple instances of a given validator provider by using the `multi: true` property in the provider object. Angular adds your custom validators to the existing collection.
+
+The Router also makes use of multiple providers associated with a single token. When you provide multiple sets of routes using [RouterModule.forRoot](https://angular.io/api/router/RouterModule#forroot) and [RouterModule.forChild](https://angular.io/api/router/RouterModule#forchild) in a single module, the [ROUTES](https://angular.io/api/router/ROUTES) token combines all the different provided sets of routes into a single value.
+
+## Tree-shakable providers
+Tree shaking refers to a compiler option that removes code from the final bundle if the app doesn't reference that code. When providers are tree-shakable, the Angular compiler removes the associated services from the final output when it determines that your application doesn't use those services. This significantly reduces the size of your bundles.
+
+> Ideally, if an application isn't injecting a service, Angular
+> shouldn't include it in the final output. However, Angular has to be
+> able to identify at build time whether the app will require the
+> service or not. Because it's always possible to inject a service
+> directly using `injector.get(Service)`, Angular can't identify all of
+> the places in your code where this injection could happen, so it has
+> no choice but to include the service in the injector. Thus, services
+> in the NgModule `providers` array or at component level are not
+> tree-shakable.
+
+The following example of non-tree-shakable providers in Angular configures a service provider for the injector of an NgModule.
+
+    import { Injectable, NgModule } from '@angular/core';
+    
+    @Injectable()
+    export class Service {
+      doSomething(): void {
+      }
+    }
+    
+    @NgModule({
+      providers: [Service],
+    })
+    export class ServiceModule {
+    }
+You can then import this module into your application module to make the service available for injection in your app, as in the following example.
+
+    @NgModule({
+      imports: [
+        BrowserModule,
+        RouterModule.forRoot([]),
+        ServiceModule,
+      ],
+    })
+    export class AppModule {
+    }
+When  `ngc`  runs, it compiles  `AppModule`  into a module factory, which contains definitions for all the providers declared in all the modules it includes. At runtime, this factory becomes an injector that instantiates these services.
+
+Tree-shaking doesn't work here because Angular can't decide to exclude one chunk of code (the provider definition for the service within the module factory) based on whether another chunk of code (the service class) is used. To make services tree-shakable, the information about how to construct an instance of the service (the provider definition) needs to be a part of the service class itself.
+
+### Creating tree-shakable providers
+
+You can make a provider tree-shakable by specifying it in the  `@[Injectable](https://angular.io/api/core/Injectable)()`  decorator on the service itself, rather than in the metadata for the NgModule or component that depends on the service.
+
+The following example shows the tree-shakable equivalent to the  `ServiceModule`  example above.
+
+    @Injectable({
+      providedIn: 'root',
+    })
+    export class Service {
+    }
+The service can be instantiated by configuring a factory function, as in the following example.
+
+    @Injectable({
+      providedIn: 'root',
+      useFactory: () => new Service('dependency'),
+    })
+    export class Service {
+      constructor(private dep: string) {
+      }
+    }
+To override a tree-shakable provider, configure the injector of a specific NgModule or component with another provider, using the `providers: []` array syntax of the `@[NgModule](https://angular.io/api/core/NgModule)()` or `@[Component](https://angular.io/api/core/Component)()` decorator.
