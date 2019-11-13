@@ -96,22 +96,22 @@ The  `ProfileEditor`  component accepts input from the user, but in a real scena
 
 Add an  `ngSubmit`  event listener to the  `form`  tag with the  `onSubmit()`  callback method.
 
-src/app/profile-editor/profile-editor.component.html (submit event)
 
-content_copy`<form [formGroup]="profileForm" (ngSubmit)="onSubmit()">`
+
+    <form [formGroup]="profileForm" (ngSubmit)="onSubmit()">
+
 
 The  `onSubmit()`  method in the  `ProfileEditor`  component captures the current value of  `profileForm`. Use  `[EventEmitter](https://angular.io/api/core/EventEmitter)`  to keep the form encapsulated and to provide the form value outside the component. The following example uses  `console.warn`  to log a message to the browser console.
 
-src/app/profile-editor/profile-editor.component.ts (submit method)
-
-`onSubmit()  {  // TODO: Use [EventEmitter](https://angular.io/api/core/EventEmitter) with form value console.warn(this.profileForm.value);  }`
+    onSubmit() {
+      // TODO: Use EventEmitter with form value
+      console.warn(this.profileForm.value);
+    }
 
 The  `submit`  event is emitted by the  `form`  tag using the native DOM event. You trigger the event by clicking a button with  `submit`  type. This allows the user to press the  **Enter**  key to submit the completed form.
 
 Use a  `button`  element to add a button to the bottom of the form to trigger the form submission.
 
-src/app/profile-editor/profile-editor.component.html (submit button)
-
-`<button  type="submit" [disabled]="!profileForm.valid">Submit</button>`
+     <button type="submit" [disabled]="!profileForm.valid">Submit</button>
 
 **Note:**  The button in the snippet above also has a  `disabled`  binding attached to it to disable the button when  `profileForm`  is invalid. You aren't performing any validation yet, so the button is always enabled. Simple form validation is covered in the  [Simple form validation](https://angular.io/guide/reactive-forms#simple-form-validation)  section.
