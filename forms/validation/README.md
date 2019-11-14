@@ -190,9 +190,146 @@ The hero form uses the  `.ng-valid`  and  `.ng-invalid`  classes to set the colo
 
 ## Cross field validation
 
+This section shows how to perform cross field validation. In the following section, we will make sure that our heroes do not reveal their true identities by filling out the Hero Form. We will do that by validating that the hero names and alter egos do not match.
 
 
+### Adding to reactive forms
 
+    The form has the following structure:
+    const heroForm = new FormGroup({
+      'name': new FormControl(),
+      'alterEgo': new FormControl(),
+      'power': new FormControl()
+    });
+
+Notice that the name and alterEgo are sibling controls. To evaluate both controls in a single custom validator, we should perform the validation in a common ancestor control: the `[FormGroup](https://angular.io/api/forms/FormGroup)`. That way, we can query the `[FormGroup](https://angular.io/api/forms/FormGroup)` for the child controls which will allow us to compare their values.
+To add a validator to the `[FormGroup](https://angular.io/api/forms/FormGroup)`, pass the new validator in as the second argument on creation.
+
+    const heroForm = new FormGroup({
+      'name': new FormControl(),
+      'alterEgo': new FormControl(),
+      'power': new FormControl()
+    }, { validators: identityRevealedValidator });
+
+The validator code is as follows:
+
+    /** A hero's name can't match the hero's alter ego */
+    export const identityRevealedValidator: ValidatorFn = (control: FormGroup): ValidationErrors | null => {
+      const name = control.get('name');
+      const alterEgo = control.get('alterEgo');
+    
+      return name && alterEgo && name.value === alterEgo.value ? { 'identityRevealed': true } : null;
+    };
+
+The identity validator implements the  `[ValidatorFn](https://angular.io/api/forms/ValidatorFn)`  interface. It takes an Angular control object as an argument and returns either null if the form is valid, or  `[ValidationErrors](https://angular.io/api/forms/ValidationErrors)`  otherwise.
+
+First we retrieve the child controls by calling the  `[FormGroup](https://angular.io/api/forms/FormGroup)`'s  [get](https://angular.io/api/forms/AbstractControl#get)  method. Then we simply compare the values of the  `name`  and  `alterEgo`  controls.
+
+If the values do not match, the hero's identity remains secret, and we can safely return null. Otherwise, the hero's identity is revealed and we must mark the form as invalid by returning an error object.
+
+Next, to provide better user experience, we show an appropriate error message when the form is invalid.
+
+reactive/hero-form-template.component.html
+
+    <div *ngIf="heroForm.errors?.identityRevealed && (heroForm.touched || heroForm.dirty)" class="cross-validation-error-message alert alert-danger">
+        Name cannot match alter ego.
+    </div>
+
+
+Note that we check if:
+
+-   the  `[FormGroup](https://angular.io/api/forms/FormGroup)`  has the cross validation error returned by the  `identityRevealed`  validator,
+-   the user is yet to  [interact](https://angular.io/guide/form-validation#why-check-dirty-and-touched)  with the form.
+
+
+### Adding to template driven forms
+First we must create a directive that will wrap the validator function. We provide it as the validator using the `[NG_VALIDATORS](https://angular.io/api/forms/NG_VALIDATORS)` token. If you are not sure why, or you do not fully understand the syntax, revisit the previous [section](https://angular.io/guide/form-validation#adding-to-template-driven-forms).
+
+    @Directive({
+      selector: '[appIdentityRevealed]',
+      providers: [{ provide: NG_VALIDATORS, useExisting: IdentityRevealedValidatorDirective, multi: true }]
+    })
+    export class IdentityRevealedValidatorDirective implements Validator {
+      validate(control: AbstractControl): ValidationErrors {
+        return identityRevealedValidator(control)
+      }
+    }
+
+Next, we have to add the directive to the html template. Since the validator must be registered at the highest level in the form, we put the directive on the `form` tag.
+
+    <form #heroForm="ngForm" appIdentityRevealed>
+To provide better user experience, we show an appropriate error message when the form is invalid.
+
+    <div *ngIf="heroForm.errors?.identityRevealed && (heroForm.touched || heroForm.dirty)" class="cross-validation-error-message alert alert-danger">
+        Name cannot match alter ego.
+    </div>
+Note that we check if:
+
+-   the form has the cross validation error returned by the  `identityRevealed`  validator,
+-   the user is yet to  [interact](https://angular.io/guide/form-validation#why-check-dirty-and-touched)  with the form.
+
+This completes the cross validation example. We managed to:
+
+-   validate the form based on the values of two sibling controls,
+-   show a descriptive error message after the user interacted with the form and the validation failed.
+
+
+## Async Validation
+
+This section shows how to create asynchronous validators. It assumes some basic knowledge of creating  [custom validators](https://angular.io/guide/form-validation#custom-validators).
+
+### The Basics
+
+Just like synchronous validators have the  [ValidatorFn](https://angular.io/api/forms/ValidatorFn)  and  [Validator](https://angular.io/api/forms/Validator)  interfaces, asynchronous validators have their own counterparts:  [AsyncValidatorFn](https://angular.io/api/forms/AsyncValidatorFn)  and  [AsyncValidator](https://angular.io/api/forms/AsyncValidator).
+
+They are very similar with the only difference being:
+
+-   They must return a Promise or an Observable,
+-   The observable returned must be finite, meaning it must complete at some point. To convert an infinite observable into a finite one, pipe the observable through a filtering operator such as  `first`,  `last`,  `take`, or  `takeUntil`.
+
+It is important to note that the asynchronous validation happens after the synchronous validation, and is performed only if the synchronous validation is successful. This check allows forms to avoid potentially expensive async validation processes such as an HTTP request if more basic validation methods fail.
+
+After asynchronous validation begins, the form control enters a  `pending`  state. You can inspect the control's  `pending`  property and use it to give visual feedback about the ongoing validation.
+
+A common UI pattern is to show a spinner while the async validation is being performed. The following example presents how to achieve this with template-driven forms:
+
+### Implementing Custom Async Validator
+In the following section, validation is performed asynchronously to ensure that our heroes pick an alter ego that is not already taken. New heroes are constantly enlisting and old heroes are leaving the service. That means that we do not have the list of available alter egos ahead of time.
+
+To validate the potential alter ego, we need to consult a central database of all currently enlisted heroes. The process is asynchronous, so we need a special validator for that.
+
+Let's start by creating the validator class.
+
+    @Injectable({ providedIn: 'root' })
+    export class UniqueAlterEgoValidator implements AsyncValidator {
+      constructor(private heroesService: HeroesService) {}
+    
+      validate(
+        ctrl: AbstractControl
+      ): Promise<ValidationErrors | null> | Observable<ValidationErrors | null> {
+        return this.heroesService.isAlterEgoTaken(ctrl.value).pipe(
+          map(isTaken => (isTaken ? { uniqueAlterEgo: true } : null)),
+          catchError(() => null)
+        );
+      }
+    }
+
+As you can see, the `UniqueAlterEgoValidator` class implements the `[AsyncValidator](https://angular.io/api/forms/AsyncValidator)` interface. In the constructor, we inject the `HeroesService` that has the following interface:
+
+    interface HeroesService {
+      isAlterEgoTaken: (alterEgo: string) => Observable<boolean>;
+    }
+
+
+In a real world application, the  `HeroesService`  is responsible for making an HTTP request to the hero database to check if the alter ego is available. From the validator's point of view, the actual implementation of the service is not important, so we can just code against the  `HeroesService`  interface.
+
+As the validation begins, the  `UniqueAlterEgoValidator`  delegates to the  `HeroesService`  `isAlterEgoTaken()`  method with the current control value. At this point the control is marked as  `pending`  and remains in this state until the observable chain returned from the  `validate()`  method completes.
+
+The  `isAlterEgoTaken()`  method dispatches an HTTP request that checks if the alter ego is available, and returns  `Observable<boolean>`  as the result. We pipe the response through the  `map`  operator and transform it into a validation result. As always, we return  `null`  if the form is valid, and  `[ValidationErrors](https://angular.io/api/forms/ValidationErrors)`  if it is not. We make sure to handle any potential errors with the  `catchError`  operator.
+
+Here we decided that  `isAlterEgoTaken()`  error is treated as a successful validation, because failure to make a validation request does not necessarily mean that the alter ego is invalid. You could handle the error differently and return the  `ValidationError`  object instead.
+
+After some time passes, the observable chain completes and the async validation is done. The  `pending`  flag is set to  `false`, and the form validity is updated.
 
 
 
